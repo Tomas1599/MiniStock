@@ -1,0 +1,139 @@
+@page "/products"
+@inject InventoryService Inventory
+
+<PageTitle>MiniStock - Products</PageTitle>
+
+<h1>Products</h1>
+
+<div class="toolbar">
+    <input type="search" placeholder="Search name, SKU or category" @bind="search" @bind:event="oninput" @bind:after="LoadAsync" />
+    <label><input type="checkbox" @bind="lowOnly" @bind:after="LoadAsync" /> Low stock only</label>
+</div>
+
+@if (message is not null)
+{
+    <p class="msg @(isError ? "error" : "ok")">@message</p>
+}
+
+@if (products is null)
+{
+    <p>Loading...</p>
+}
+else if (products.Count == 0)
+{
+    <p>No products match.</p>
+}
+else
+{
+    <table>
+        <thead>
+            <tr><th>SKU</th><th>Product</th><th>Category</th><th>Supplier</th><th class="num">Price</th><th class="num">In stock</th><th class="num">Reorder at</th><th></th></tr>
+        </thead>
+        <tbody>
+        @foreach (var p in products)
+        {
+            <tr class="@(p.IsLow ? "low" : null)">
+                <td>@p.Sku</td>
+                <td>@p.Name</td>
+                <td>@p.Category</td>
+                <td>@(p.Supplier?.Name ?? "-")</td>
+                <td class="num">@p.UnitPrice.ToString("N2") &euro;</td>
+                <td class="num">@p.Quantity</td>
+                <td class="num">@p.ReorderLevel</td>
+                <td class="actions">
+                    <button @onclick="() => QuickAdjust(p, -1)" title="Remove one">-1</button>
+                    <button @onclick="() => QuickAdjust(p, 1)" title="Add one">+1</button>
+                    <button @onclick="() => StartAdjust(p)">Adjust...</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@if (selected is not null)
+{
+    <section class="panel">
+        <h2>Adjust stock: @selected.Sku, @selected.Name</h2>
+        <p>Currently <strong>@selected.Quantity</strong> in stock. Use a negative number to remove stock.</p>
+        <div class="form-row">
+            <label>Change <input type="number" @bind="delta" /></label>
+            <label>Reason <input type="text" @bind="reason" placeholder="e.g. Supplier delivery, Sold, Damaged" /></label>
+            <button class="primary" @onclick="ApplyAdjust">Apply</button>
+            <button @onclick="() => selected = null">Cancel</button>
+        </div>
+    </section>
+}
+
+<details class="panel">
+    <summary>Add a product</summary>
+    <div class="form-grid">
+        <label>SKU <input type="text" @bind="newSku" /></label>
+        <label>Name <input type="text" @bind="newName" /></label>
+        <label>Category <input type="text" @bind="newCategory" /></label>
+        <label>Price (&euro;) <input type="number" step="0.01" @bind="newPrice" /></label>
+        <label>Initial quantity <input type="number" @bind="newQuantity" /></label>
+        <label>Reorder level <input type="number" @bind="newReorder" /></label>
+    </div>
+    <button class="primary" @onclick="AddProduct">Add product</button>
+</details>
+
+@code {
+    private List<Product>? products;
+    private string? search;
+    private bool lowOnly;
+
+    private string? message;
+    private bool isError;
+
+    private Product? selected;
+    private int delta;
+    private string reason = "";
+
+    private string newSku = "", newName = "", newCategory = "";
+    private decimal newPrice;
+    private int newQuantity, newReorder;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync() => products = await Inventory.GetProductsAsync(search, lowOnly);
+
+    private void Show(string text, bool error = false) { message = text; isError = error; }
+
+    private void StartAdjust(Product p) { selected = p; delta = 0; reason = ""; message = null; }
+
+    private Task QuickAdjust(Product p, int amount) =>
+        Run(() => Inventory.AdjustStockAsync(p.Id, amount, "Manual adjustment"),
+            $"{p.Sku}: {(amount > 0 ? "+" : "")}{amount}");
+
+    private async Task ApplyAdjust()
+    {
+        if (selected is null) return;
+        var ok = await Run(() => Inventory.AdjustStockAsync(selected.Id, delta, reason),
+            $"{selected.Sku}: {(delta > 0 ? "+" : "")}{delta} ({reason.Trim()})");
+        if (ok) selected = null;
+    }
+
+    private async Task AddProduct()
+    {
+        var ok = await Run(() => Inventory.AddProductAsync(newSku, newName, newCategory, newPrice, newQuantity, newReorder),
+            $"Added {newSku.Trim().ToUpperInvariant()}");
+        if (ok) { newSku = newName = newCategory = ""; newPrice = 0; newQuantity = newReorder = 0; }
+    }
+
+    private async Task<bool> Run(Func<Task> action, string success)
+    {
+        try
+        {
+            await action();
+            Show(success);
+            await LoadAsync();
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            Show(ex.Message, error: true);
+            return false;
+        }
+    }
+}

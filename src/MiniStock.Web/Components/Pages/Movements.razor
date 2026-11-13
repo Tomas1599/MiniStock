@@ -1,0 +1,36 @@
+@page "/movements"
+@inject InventoryService Inventory
+
+<PageTitle>MiniStock - Movements</PageTitle>
+
+<h1>Stock movements</h1>
+<p>The 100 most recent changes, newest first.</p>
+
+@if (movements is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table>
+        <thead><tr><th>When (UTC)</th><th>SKU</th><th>Product</th><th class="num">Change</th><th>Reason</th></tr></thead>
+        <tbody>
+        @foreach (var m in movements)
+        {
+            <tr>
+                <td>@m.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                <td>@m.Product?.Sku</td>
+                <td>@m.Product?.Name</td>
+                <td class="num @(m.Delta < 0 ? "neg" : "pos")">@(m.Delta > 0 ? "+" : "")@m.Delta</td>
+                <td>@m.Reason</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<StockMovement>? movements;
+
+    protected override async Task OnInitializedAsync() => movements = await Inventory.GetRecentMovementsAsync(100);
+}
